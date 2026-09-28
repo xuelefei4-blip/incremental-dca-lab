@@ -1,0 +1,425 @@
+<!-- 
+【增量定投动力学实验台 (Incremental DCA Lab)】
+模块：[3.0 口袋母体]
+职责：快照对比陈列馆 (IndexedDB 原生持久化、缩略图展厅、双图左右1:1并排比对、合成海报导出)
+版本：V0.6.1 (优化高DPI全屏大图查看器)
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>定投模型快照口袋 (Pocket 3.0) - 双轨对比工坊</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0b0f19; color: #e2e8f0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    /* 顶部导航栏 */
+    header {
+      background: #0f172a; border-bottom: 1px solid #1e293b; padding: 10px 20px;
+      display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    h1 { font-size: 15px; color: #38bdf8; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .badge { font-size: 11px; background: #1e293b; color: #94a3b8; padding: 2px 8px; border-radius: 12px; border: 1px solid #334155; white-space: nowrap; }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+
+    /* 按钮样式：强制禁止折行 */
+    button {
+      border: 1px solid #334155; background: #1e293b; color: #f8fafc; padding: 6px 14px;
+      border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    button:hover { border-color: #38bdf8; color: #38bdf8; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; border-color: #334155 !important; color: #64748b !important; }
+    .btn-compare { background: #d97706; border-color: #f59e0b; color: white; font-weight: bold; }
+    .btn-compare:hover { background: #b45309; color: white; }
+    .btn-clear { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.08); }
+    .btn-clear:hover { background: #ef4444; color: white; }
+
+    /* 展厅网格 */
+    main { flex: 1; padding: 20px 24px; overflow-y: auto; }
+    .gallery-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
+    }
+    .snap-card {
+      background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; overflow: hidden;
+      display: flex; flex-direction: column; transition: all 0.2s; position: relative;
+    }
+    .snap-card.selected { border-color: #f59e0b; box-shadow: 0 0 12px rgba(245, 158, 11, 0.25); }
+    
+    .card-img-wrap {
+      width: 100%; height: 180px; background: #070a13; position: relative; cursor: pointer; overflow: hidden;
+    }
+    .card-img-wrap img { width: 100%; height: 100%; object-fit: contain; transition: transform 0.2s; }
+    .card-img-wrap:hover img { transform: scale(1.02); }
+    .img-zoom-tip {
+      position: absolute; bottom: 6px; right: 8px; font-size: 10px; background: rgba(0,0,0,0.65);
+      color: #94a3b8; padding: 2px 6px; border-radius: 3px; pointer-events: none;
+    }
+
+    .card-body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .card-header-row { display: flex; justify-content: space-between; align-items: center; }
+    .card-title { font-size: 13px; font-weight: bold; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+    .card-select-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #f59e0b; cursor: pointer; white-space: nowrap; }
+    .card-select-label input { accent-color: #f59e0b; cursor: pointer; }
+
+    .card-meta-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #070a13;
+      padding: 8px; border-radius: 4px; border: 1px solid #1e293b; font-size: 11px;
+    }
+    .meta-item { display: flex; flex-direction: column; }
+    .meta-lbl { font-size: 9.5px; color: #64748b; margin-bottom: 1px; }
+    .meta-val { font-family: monospace; font-weight: bold; color: #cbd5e1; }
+
+    .card-footer {
+      display: flex; justify-content: space-between; align-items: center; margin-top: 4px;
+      padding-top: 8px; border-top: 1px solid #1e293b;
+    }
+    .snap-time { font-size: 10px; color: #64748b; }
+    .card-actions { display: flex; gap: 6px; }
+
+    /* 空状态 */
+    .empty-box {
+      margin-top: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; color: #64748b; font-size: 13px;
+    }
+
+    /* 弹窗通用结构 */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(7, 10, 19, 0.96); z-index: 1000; display: none;
+      flex-direction: column; backdrop-filter: blur(8px);
+    }
+    .modal-header {
+      padding: 8px 20px; height: 48px; background: #0f172a; border-bottom: 1px solid #1e293b;
+      display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; gap: 16px;
+    }
+    .modal-header-title {
+      font-weight: bold; font-size: 13px; color: #f8fafc;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 8px;
+    }
+
+    /* 双图左右对比 */
+    .modal-body-compare {
+      flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 20px; overflow: hidden;
+    }
+    .compare-col {
+      display: flex; flex-direction: column; gap: 8px; height: 100%; background: #070a13;
+      border: 1px solid #1e293b; border-radius: 6px; padding: 10px; overflow: hidden;
+    }
+    .compare-col-header { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; white-space: nowrap; }
+    .compare-col-img {
+      flex: 1; width: 100%; object-fit: contain; border-radius: 4px; background: #0b0f19;
+    }
+
+    /* 单图全屏查看器：自适应居中 + 支持点击 1:1 滚动 */
+    .single-view-box {
+      flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px; overflow: auto;
+      background: #070a13; position: relative;
+    }
+    .single-view-box img {
+      max-width: 98%; max-height: 98%; object-fit: contain; border-radius: 6px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.8); border: 1px solid #1e293b; cursor: zoom-in; transition: transform 0.15s;
+    }
+    /* 1:1 原始高清展开状态 */
+    .single-view-box.zoomed {
+      display: block; overflow: auto; text-align: center; padding: 24px;
+    }
+    .single-view-box.zoomed img {
+      max-width: none; max-height: none; width: auto; height: auto; cursor: zoom-out;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部导航 -->
+  <header>
+    <div class="header-left">
+      <h1>💼 投资模型快照陈列馆 <span style="font-size: 11px; color:#f59e0b;">(Pocket 3.0 - IndexedDB 持久化)</span></h1>
+      <span class="badge" id="pocketCountBadge">0 张存档</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn-compare" id="btnRunCompare" disabled>⚖️ 左右对比 (已选 0/2)</button>
+      <button onclick="window.close()">✕ 返回主表 [1.0]</button>
+      <button class="btn-clear" id="btnClearAll">🗑️ 清空所有</button>
+    </div>
+  </header>
+
+  <!-- 展厅主体 -->
+  <main>
+    <div class="gallery-grid" id="galleryGrid"></div>
+    <div class="empty-box" id="emptyTip" style="display: none;">
+      <div style="font-size: 32px;">📭</div>
+      <div>口袋当前空空如也</div>
+      <div style="font-size: 11px; color: #475569;">请在主表 [1.0] 测试完成后，点击右侧的<b>【📸 截图存入口袋】</b></div>
+    </div>
+  </main>
+
+  <!-- 双图对比全屏浮层 -->
+  <div class="modal-overlay" id="compareModal">
+    <div class="modal-header">
+      <div class="modal-header-title" id="compareTitle">双轨全景左右对比</div>
+      <div style="display: flex; gap: 8px;">
+        <button id="btnExportCombinedPoster" style="color: #10b981; border-color: #10b981; background: rgba(16, 185, 129, 0.1);">
+          📷 导出双轨合成大图 (PNG)
+        </button>
+        <button id="btnCloseCompare">✕ 退出对比</button>
+      </div>
+    </div>
+    <div class="modal-body-compare" id="compareBody"></div>
+  </div>
+
+  <!-- 单张大图查看浮层 -->
+  <div class="modal-overlay" id="singleModal">
+    <div class="modal-header">
+      <div class="modal-header-title" id="singleTitle">单张快照全屏查看</div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="font-size: 11px; color: #64748b;">(💡 点击图片可切换 1:1 原始清晰度)</span>
+        <button id="btnCloseSingle">✕ 关闭查看</button>
+      </div>
+    </div>
+    <div class="single-view-box" id="singleBox"></div>
+  </div>
+
+  <script type="module">
+    import { getAllSnapshots, deleteSnapshot, clearSnapshots } from './db.js';
+
+    let pocketItems = [];
+    const selectedIds = new Set();
+
+    async function loadPocket() {
+      try {
+        pocketItems = await getAllSnapshots();
+      } catch (e) {
+        pocketItems = [];
+      }
+      renderGallery();
+    }
+
+    function renderGallery() {
+      const grid = document.getElementById('galleryGrid');
+      const emptyTip = document.getElementById('emptyTip');
+      const countBadge = document.getElementById('pocketCountBadge');
+      const btnCompare = document.getElementById('btnRunCompare');
+
+      countBadge.innerText = `${pocketItems.length} 张存档`;
+      btnCompare.innerText = `⚖️ 左右对比 (已选 ${selectedIds.size}/2)`;
+      btnCompare.disabled = (selectedIds.size !== 2);
+
+      if (pocketItems.length === 0) {
+        grid.innerHTML = '';
+        emptyTip.style.display = 'flex';
+        return;
+      }
+      emptyTip.style.display = 'none';
+
+      grid.innerHTML = '';
+      pocketItems.forEach(item => {
+        const isSelected = selectedIds.has(item.id);
+        const card = document.createElement('div');
+        card.className = `snap-card ${isSelected ? 'selected' : ''}`;
+
+        const roiColor = (item.roi && item.roi.startsWith('+')) ? '#10b981' : '#ef4444';
+
+        card.innerHTML = `
+          <div class="card-img-wrap" data-id="${item.id}">
+            <img src="${item.imgUrl}" alt="快照" />
+            <div class="img-zoom-tip">🔍 点击放大</div>
+          </div>
+          <div class="card-body">
+            <div class="card-header-row">
+              <span class="card-title" title="${item.modeLabel}">${item.modeLabel}</span>
+              <label class="card-select-label">
+                <input type="checkbox" data-check-id="${item.id}" ${isSelected ? 'checked' : ''}> 对比
+              </label>
+            </div>
+            <div class="card-meta-grid">
+              <div class="meta-item"><span class="meta-lbl">回测标的</span><span class="meta-val">${item.source}</span></div>
+              <div class="meta-item"><span class="meta-lbl">投资利润率</span><span class="meta-val" style="color:${roiColor};">${item.roi}</span></div>
+              <div class="meta-item"><span class="meta-lbl">持仓均价</span><span class="meta-val">${item.cost}</span></div>
+              <div class="meta-item"><span class="meta-lbl">总投入本金</span><span class="meta-val">${item.invested}</span></div>
+            </div>
+            <div class="card-footer">
+              <span class="snap-time">${item.createTime}</span>
+              <div class="card-actions">
+                <a href="${item.imgUrl}" download="${item.modeLabel}_${item.id}.png" style="text-decoration:none;">
+                  <button type="button" style="padding: 2px 8px; font-size: 11px;">💾 下载</button>
+                </a>
+                <button type="button" data-del-id="${item.id}" style="padding: 2px 8px; font-size: 11px; color:#ef4444;">🗑️</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        card.querySelector('.card-img-wrap').addEventListener('click', () => viewSingle(item.id));
+        card.querySelector('input[type="checkbox"]').addEventListener('change', () => toggleSelect(item.id));
+        card.querySelector('button[data-del-id]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteItem(item.id);
+        });
+
+        grid.appendChild(card);
+      });
+    }
+
+    function toggleSelect(id) {
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+      } else {
+        if (selectedIds.size >= 2) {
+          alert('双轨对比功能最多勾选 2 张截图！');
+          renderGallery();
+          return;
+        }
+        selectedIds.add(id);
+      }
+      renderGallery();
+    }
+
+    async function deleteItem(id) {
+      await deleteSnapshot(id);
+      selectedIds.delete(id);
+      await loadPocket();
+    }
+
+    async function clearAllPocket() {
+      if (!confirm('确定清空口袋里的所有快照存档吗？此操作无法撤销。')) return;
+      await clearSnapshots();
+      selectedIds.clear();
+      await loadPocket();
+    }
+
+    function viewSingle(id) {
+      const item = pocketItems.find(x => x.id === id);
+      if (!item) return;
+
+      const roiColor = (item.roi && item.roi.startsWith('+')) ? '#10b981' : '#ef4444';
+      document.getElementById('singleTitle').innerHTML = `
+        🔍 详情：<span style="color:#38bdf8;">${item.modeLabel}</span>
+        <span style="color:#475569;margin:0 4px;">|</span>
+        利润率: <span style="color:${roiColor};">${item.roi}</span>
+        <span style="color:#475569;margin:0 4px;">|</span>
+        均价: <span style="color:#10b981;">${item.cost}</span>
+      `;
+
+      const box = document.getElementById('singleBox');
+      box.className = 'single-view-box'; // 重置为默认自适应状态
+      box.innerHTML = `<img src="${item.imgUrl}" title="点击可切换 1:1 原始清晰度 / 适应屏幕" />`;
+      
+      // 点击图片切换 1:1 与 自适应
+      const img = box.querySelector('img');
+      img.addEventListener('click', () => {
+        box.classList.toggle('zoomed');
+      });
+
+      document.getElementById('singleModal').style.display = 'flex';
+    }
+
+    function closeSingleModal() {
+      document.getElementById('singleModal').style.display = 'none';
+    }
+
+    // 双轨左右对比
+    document.getElementById('btnRunCompare').addEventListener('click', () => {
+      if (selectedIds.size !== 2) {
+        alert('请先在下方列表中勾选 2 张快照进行对比！');
+        return;
+      }
+      const [A, B] = Array.from(selectedIds).map(id => pocketItems.find(x => x.id === id));
+      if (!A || !B) return;
+
+      document.getElementById('compareTitle').innerHTML = `
+        ⚖️ 双轨对比：<span style="color:#38bdf8;">[左] ${A.modeLabel}</span>  VS  <span style="color:#f59e0b;">[右] ${B.modeLabel}</span>
+      `;
+
+      document.getElementById('compareBody').innerHTML = `
+        <div class="compare-col" style="border-color: #0284c7;">
+          <div class="compare-col-header">
+            <span style="color: #38bdf8; font-weight: bold; font-size: 13px;">${A.modeLabel}</span>
+            <span style="font-size: 12px; font-weight: bold; color: ${A.roi && A.roi.startsWith('+') ? '#10b981' : '#ef4444'};">利润率: ${A.roi} | 均价: ${A.cost}</span>
+          </div>
+          <img class="compare-col-img" src="${A.imgUrl}" />
+        </div>
+        <div class="compare-col" style="border-color: #f59e0b;">
+          <div class="compare-col-header">
+            <span style="color: #f59e0b; font-weight: bold; font-size: 13px;">${B.modeLabel}</span>
+            <span style="font-size: 12px; font-weight: bold; color: ${B.roi && B.roi.startsWith('+') ? '#10b981' : '#ef4444'};">利润率: ${B.roi} | 均价: ${B.cost}</span>
+          </div>
+          <img class="compare-col-img" src="${B.imgUrl}" />
+        </div>
+      `;
+
+      document.getElementById('compareModal').style.display = 'flex';
+    });
+
+    function closeCompareModal() {
+      document.getElementById('compareModal').style.display = 'none';
+    }
+
+    // 合成左右对比长图
+    document.getElementById('btnExportCombinedPoster').addEventListener('click', () => {
+      const [A, B] = Array.from(selectedIds).map(id => pocketItems.find(x => x.id === id));
+      if (!A || !B) return;
+
+      const imgA = new Image();
+      const imgB = new Image();
+      imgA.src = A.imgUrl;
+      imgB.src = B.imgUrl;
+
+      let loaded = 0;
+      const onDone = () => {
+        loaded++;
+        if (loaded < 2) return;
+
+        const pad = 24;
+        const targetW = imgA.width;
+        const targetH = imgA.height;
+
+        const cvs = document.createElement('canvas');
+        cvs.width = targetW * 2 + pad * 3;
+        cvs.height = targetH + 80;
+        const ctx = cvs.getContext('2d');
+
+        ctx.fillStyle = '#0b0f19';
+        ctx.fillRect(0, 0, cvs.width, cvs.height);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 20px -apple-system, sans-serif';
+        ctx.fillText(`增量定投动力学 · 双轨回测对比海报 [${A.source}]`, pad, 42);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.fillText(`左: ${A.modeLabel} (${A.cost} / ${A.roi})     右: ${B.modeLabel} (${B.cost} / ${B.roi})`, pad + 420, 42);
+
+        ctx.drawImage(imgA, pad, 60, targetW, targetH);
+        ctx.drawImage(imgB, pad * 2 + targetW, 60, targetW, targetH);
+
+        cvs.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.download = `双轨对比_${A.source}_${Date.now()}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, 'image/png');
+      };
+
+      imgA.onload = onDone;
+      imgB.onload = onDone;
+    });
+
+    document.getElementById('btnCloseSingle').addEventListener('click', closeSingleModal);
+    document.getElementById('btnCloseCompare').addEventListener('click', closeCompareModal);
+    document.getElementById('btnClearAll').addEventListener('click', clearAllPocket);
+
+    window.addEventListener('focus', loadPocket);
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'POCKET_SNAPSHOT_SAVED') {
+        loadPocket();
+      }
+    });
+
+    window.onload = loadPocket;
+  </script>
+</body>
+</html>

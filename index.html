@@ -1,0 +1,400 @@
+<!-- 
+【增量定投动力学实验台 (Incremental DCA Lab)】
+模块：[1.0 主表母体]
+职责：主界面 DOM (历史真实记账台、时空环境、HUD看板、固定模式双向互锁、快照口袋插槽)
+版本：V0.6
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>增量定投动力学实验台 (V0.3)</title>
+  <link rel="stylesheet" href="main.css" />
+  <style>
+    /* 严格统一上下两表字体族、等宽数字排版与文字渲染 */
+    .chart-hud, .summary-bar {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif !important;
+      font-variant-numeric: tabular-nums !important;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    
+    /* 上表：一级客观市场舱 (升级为自适应 Grid 网格，解决挤压与重叠问题) */
+    .chart-hud {
+      display: grid;
+      /* 6列非对称比例：给首尾长文本预留充分空间，中间数值居中分布 */
+      grid-template-columns: 1.35fr 1fr 1fr 1.05fr 1.05fr 1.35fr;
+      align-items: center;
+      padding: 10px 18px;
+      margin-bottom: 10px;           /* 与主图表拉开清晰的呼吸感间隙 */
+      background: rgba(15, 23, 42, 0.85);
+      border-radius: 6px;
+      border: 1px solid #1e293b;
+      backdrop-filter: blur(4px);
+    }
+    .chart-hud .hud-item {
+      display: flex;
+      flex-direction: column;        /* 上下垂直立体排版 */
+      align-items: center;
+      text-align: center;
+      gap: 3px;
+      min-width: 0;                  /* 杜绝长文本溢出挤压 */
+    }
+    .chart-hud .hud-label {
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: normal;
+      white-space: nowrap;
+    }
+    .chart-hud .hud-val {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #f8fafc;
+      white-space: nowrap;
+    }
+    .chart-hud .hud-val.cyan { color: #38bdf8; }
+    .chart-hud .hud-val.green { color: #10b981; }
+    .chart-hud .hud-val.orange { color: #f59e0b; }
+    .chart-hud .hud-val.red { color: #ef4444; }
+
+    /* 下表：二级个人账本舱 */
+    .summary-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 10px 48px;
+      gap: 12px;
+    }
+    .summary-bar .sum-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 3px;
+    }
+    .summary-bar .sum-label {
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: normal;
+    }
+    .summary-bar .sum-val {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .summary-bar .sum-val.cyan { color: #38bdf8; }
+    .summary-bar .sum-val.green { color: #10b981; }
+    .summary-bar .sum-val.yellow { color: #eab308; }
+    .summary-bar .sum-val.orange { color: #f59e0b; }
+
+    /* 悬浮数据框 (K线风格 Tooltip) */
+    .breach-tooltip {
+      position: absolute;
+      pointer-events: none;
+      z-index: 60;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #ef4444;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(239, 68, 68, 0.25);
+      border-radius: 6px;
+      padding: 10px 14px;
+      min-width: 220px;
+      backdrop-filter: blur(6px);
+      transform: translate(-50%, -105%);
+      transition: opacity 0.1s ease;
+    }
+    .breach-tooltip .tip-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 6px;
+      margin-bottom: 6px;
+      border-bottom: 1px dashed rgba(239, 68, 68, 0.35);
+      font-size: 11.5px;
+      font-weight: bold;
+      color: #fca5a5;
+    }
+    .breach-tooltip .tip-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      line-height: 1.7;
+    }
+    .breach-tooltip .tip-lbl { color: #94a3b8; }
+    .breach-tooltip .tip-val { font-family: monospace; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <!-- 左侧主图表区 -->
+    <div class="view-panel">
+      <div class="chart-box" style="position: relative;">
+        <!-- 上方：一级客观市场舱 (Grid 网格舒展布局) -->
+        <div class="chart-hud">
+          <div class="hud-item">
+            <span class="hud-label">时间进度</span>
+            <span id="hudPeriod" class="hud-val">-</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="hud-label">有效交易日</span>
+            <span id="hudValidDays" class="hud-val cyan">-</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="hud-label">未交易日</span>
+            <span id="hudRestDays" class="hud-val orange">-</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="hud-label">市场现价 P(t)</span>
+            <span id="hudPrice" class="hud-val cyan">-</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="hud-label">标的基准涨幅</span>
+            <span id="hudMarketChange" class="hud-val green">-</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="hud-label">交易环境</span>
+            <span id="hudMarketStatus" class="hud-val cyan">开市交易中</span>
+          </div>
+        </div>
+
+        <!-- 悬浮数据框挂载点 (K线风格 Tooltip) -->
+        <div id="breachTooltip" class="breach-tooltip" style="display: none;"></div>
+
+        <!-- 保留隐式插槽，确保 JS 联动兼容安全 -->
+        <span id="chartActualDays" style="display: none;"></span>
+
+        <canvas id="mainCanvas"></canvas>
+      </div>
+
+      <!-- 下方：二级个人账本舱 (用户资金投入与收益衍生指标) -->
+      <div class="summary-bar">
+        <div class="sum-item">
+          <span class="sum-label">累计已投入</span>
+          <span id="sumInvested" class="sum-val cyan">-</span>
+        </div>
+        
+        <!-- [ 1 ] 黄金插槽：休市未交易滞留金额与天数 -->
+        <div class="sum-item">
+          <span class="sum-label">休市未投(滞留)</span>
+          <span id="sumPending" class="sum-val orange">-</span>
+        </div>
+
+        <div class="sum-item">
+          <span class="sum-label">持仓平均成本</span>
+          <span id="sumCost" class="sum-val green">-</span>
+        </div>
+
+        <div class="sum-item">
+          <span class="sum-label">当日定投占比</span>
+          <span id="sumRatio" class="sum-val yellow">-</span>
+        </div>
+
+        <div class="sum-item">
+          <span class="sum-label">当前资产总市值</span>
+          <span id="sumValue" class="sum-val">-</span>
+        </div>
+
+        <div class="sum-item">
+          <span class="sum-label">投资利润率 (ROI)</span>
+          <span id="sumRoi" class="sum-val green">-</span>
+        </div>
+        
+        <div class="sum-item">
+          <span class="sum-label" title="扣除年化 7.0% 货币购买力贬值后的真实净利润率">真实净利润(扣贬值)</span>
+          <span id="sumRealRoi" class="sum-val green">-</span>
+        </div>
+      </div>
+    </div> <!-- 闭合 view-panel -->
+
+    <!-- 右侧参数控制列 -->
+    <div class="control-sidebar">
+      <div class="sidebar-title">模型因素输入</div>
+
+      <!-- 模块 1：价格与时空环境设置 -->
+      <div class="card-group">
+        <div class="group-title">1. 价格与时空环境</div>
+
+        <div class="field">
+          <label>资产标的来源</label>
+          <select id="inSource" class="input-box select-box">
+            <option value="ndx" selected>纳斯达克 100 (真实宏观 1985-2026)</option>
+            <option value="spx">标普 500 (真实宏观 1928-2026)</option>
+            <option value="hs300">沪深 300 (真实宏观 2005-2026)</option>
+            <option value="sh">上证综合指数 (真实宏观 1990-2026)</option>
+            <option value="hsi">香港恒生指数 (真实宏观 1986-2026)</option>
+            <option value="n225">日经 225 (真实宏观 1965-2026)</option>
+            <option value="stoxx50">欧洲斯托克 50 (真实宏观 2000-2026)</option>
+            <option value="dax">德国 DAX 40 (真实宏观 1987-2026)</option>
+            <option value="btc">比特币 / BTC (高弹性加密资产 2013-2026)</option>
+            <option value="gold">黄金现货 / Gold (抗通胀避险资产 1970-2026)</option>
+            <option value="custom">自定义数学模型</option>
+          </select>
+        </div>
+
+        <div class="field" style="margin-top: 8px;">
+          <label>周期选择 (起始年月 — 结束年月)</label>
+          <div class="field-row" style="align-items: center; gap: 6px;">
+            <div class="field-col">
+              <input type="month" id="inPeriodStart" class="input-box" value="2023-08" 
+                     min="1928-01" max="2026-12" 
+                     style="height: 34px; color-scheme: dark; cursor: pointer;" />
+            </div>
+            <div style="color: #64748b; font-size: 13px; padding: 0 2px;">—</div>
+            <div class="field-col">
+              <input type="month" id="inPeriodEnd" class="input-box" value="2026-09" 
+                     min="1928-01" max="2026-12" 
+                     style="height: 34px; color-scheme: dark; cursor: pointer;" />
+            </div>
+          </div>
+          <div id="spanTip" style="font-size: 11px; color: #38bdf8; margin-top: 4px;">
+            跨度: 3 年 1 个月 (共 37 个月 / 约 777 个交易日)
+          </div>
+        </div>
+
+        <!-- 自定义专用参数 -->
+        <div id="customGroup" style="display: none; margin-top: 8px;">
+          <div class="field-row">
+            <div class="field-col">
+              <label>起始价格 (P_start)</label>
+              <input type="number" id="inPriceStart" class="input-box" value="100" />
+            </div>
+            <div class="field-col">
+              <label>结尾价格 (P_end)</label>
+              <input type="number" id="inPriceEnd" class="input-box" value="100" />
+            </div>
+          </div>
+
+          <div class="field-row" style="margin-top: 6px;">
+            <div class="field-col">
+              <label>波动振幅 (±%)</label>
+              <input type="number" id="inAmplitude" class="input-box" value="50" min="0" max="95" step="5" />
+            </div>
+            <div class="field-col">
+              <label>波动频率</label>
+              <select id="inCycle" class="input-box select-box">
+                <option value="0">无波动 (平直)</option>
+                <option value="1" selected>1年 (高频)</option>
+                <option value="2">2年 (中频)</option>
+                <option value="4">4年 (经典)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <button id="btnApplyPrice" class="btn-sub" style="margin-top: 8px;">✓ 确认价格环境</button>
+      </div>
+
+      <!-- 模块 2：定投资金规则卡片 -->
+      <div class="card-group">
+        <div class="group-title">2. 定投资金规则</div>
+        
+        <div class="field">
+          <div style="display: flex; gap: 8px; align-items: center; height: 34px; margin-bottom: 8px;">
+            <select id="investModeSelect" class="input-box select-box" 
+                    style="flex: 1; height: 34px; padding: 0 10px; font-size: 12px; color: #38bdf8; font-weight: bold; cursor: pointer; border-radius: 4px; border: 1px solid #334155; background: #1e293b;">
+              <option value="fixed" selected>⚙️ 固定金额模式</option>
+              <option value="strategy">⚡ 自定义增量策略</option>
+            </select>
+
+            <button type="button" id="btnOpenSandbox" class="btn-sub" 
+                    style="display: none; height: 34px; padding: 0 12px; font-size: 11px; font-weight: bold; border-color: #f59e0b; color: #f59e0b; background: rgba(245, 158, 11, 0.08); white-space: nowrap; flex-shrink: 0; border-radius: 4px; cursor: pointer;" 
+                    title="打开策略沙盒进行推演与定义">
+              策略模型定义 ↗
+            </button>
+          </div>
+
+          <!-- 模式 A：固定金额双向互锁输入框 (单日 vs 总额) -->
+          <div id="boxModeFixed">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="position: relative; display: flex; align-items: center;">
+                  <input type="number" id="inBaseInvest" class="input-box" value="300" step="10" min="1" 
+                         style="height: 34px; padding-right: 32px; font-weight: bold; color: #38bdf8;" />
+                  <span style="position: absolute; right: 8px; font-size: 11px; color: #64748b; pointer-events: none;">元/天</span>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="position: relative; display: flex; align-items: center;">
+                  <input type="number" id="inTotalBudget" class="input-box" value="" step="1000" min="1" 
+                         placeholder="总预算"
+                         style="height: 34px; padding-right: 24px; font-weight: bold; color: #f59e0b;" />
+                  <span style="position: absolute; right: 8px; font-size: 11px; color: #64748b; pointer-events: none;">元</span>
+                </div>
+              </div>
+            </div>
+            <div id="fixedInterlockTip" style="font-size: 10px; color: #64748b; margin-top: 4px; line-height: 1.3;">
+              自然日基准: -- 天 | 双向联动自动折算
+            </div>
+          </div>
+
+          <!-- 模式 B：自定义策略挂载卡片 -->
+          <div id="boxModeStrategy" style="display: none; background: #090e1a; border: 1px dashed #f59e0b; border-radius: 4px; padding: 8px 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span id="strategyStatusText" style="font-size: 11px; color: #f59e0b; font-weight: bold;">⚡ 正在读取本地策略...</span>
+              <button type="button" id="btnImportStrategyFile" class="btn-sub" style="height: 24px; padding: 0 8px; font-size: 10px; width: auto; border-radius: 3px;">
+                导入文件
+              </button>
+              <input type="file" id="strategyFileInput" accept=".json" style="display: none;" />
+            </div>
+            <div id="strategyDetailDesc" style="font-size: 10px; color: #94a3b8; margin-top: 4px; line-height: 1.4;">
+              未检测到附表策略数据。点击上方“策略模型定义 ↗”推演生成或导入。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模块 3：每日定投占比 极限值设定 (纯净设置，取消按钮) -->
+      <div class="card-group" id="cardLimitRatio">
+        <div class="group-title" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>3. 每日定投占比 极限值设定</span>
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #ef4444; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" id="chkShowBreachLines" checked style="accent-color: #ef4444; cursor: pointer;" />
+            <span>显示红杠</span>
+          </label>
+        </div>
+
+        <!-- 数值输入与建议区间 -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+          <div style="flex: 1; display: flex; align-items: center; background: #0b1120; border: 1px solid #334155; border-radius: 4px; padding: 0 8px;">
+            <input type="number" id="inLimitRatio" class="input-box" value="0.05" step="0.01" min="0.001" max="1.0"
+                   style="border: none; background: transparent; color: #38bdf8; font-weight: bold; width: 100%; height: 28px; font-size: 12px; font-family: monospace; outline: none;" />
+            <span style="font-size: 11px; color: #94a3b8; font-weight: bold;">%</span>
+          </div>
+          <span style="font-size: 10.5px; color: #64748b; white-space: nowrap;">(建议: 0.05% ~ 0.01%)</span>
+        </div>
+      </div>
+
+      <!-- 模块 4：[3.0] 口袋连接入口 -->
+      <div class="card-group" id="cardPocket" style="border-color: #334155;">
+        <div class="group-title" style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: #38bdf8;">4. 截图存档口袋</span>
+          <span id="pocketBadge" style="font-size: 10px; background: #334155; color: #94a3b8; font-weight: bold; padding: 1px 6px; border-radius: 10px;">0 张截图</span>
+        </div>
+
+        <div style="display: flex; gap: 6px; margin-top: 8px;">
+          <button type="button" id="btnSnapPocket" class="btn-sub" style="flex: 1; height: 34px; font-size: 12px; color: #38bdf8; border-color: #0284c7; background: rgba(2, 132, 199, 0.15); font-weight: bold; cursor: pointer;">
+            📸 截图存入口袋
+          </button>
+          <button type="button" id="btnOpenPocket" class="btn-sub" style="flex: 1; height: 34px; font-size: 12px; color: #f59e0b; border-color: #f59e0b; background: rgba(245, 158, 11, 0.15); font-weight: bold; cursor: pointer;">
+            💼 进入口袋对比
+          </button>
+        </div>
+        <div id="pocketStatusTip" style="font-size: 10px; color: #64748b; margin-top: 6px; line-height: 1.4;">
+          每次测试完成后点击截图，自动归档至 [3.0] 口袋独立陈列馆。
+        </div>
+      </div>
+
+      <button id="btnPlay" class="btn-play">▶ 开始演示</button>
+    </div>
+  </div>
+
+  <script type="module" src="./main_app.js"></script>
+</body>
+</html>

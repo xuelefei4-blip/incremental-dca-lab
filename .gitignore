@@ -1,0 +1,16 @@
+# 忽略私有爬虫更新脚本与本地环境
+scripts/
+
+# 忽略打包产物与临时文件
+build/
+dist/
+*.spec
+*.exe
+
+# 忽略个人临时笔记
+read.txt
+
+# 忽略操作系统及编辑器的临时缓存
+.vscode/
+.DS_Store
+Thumbs.db

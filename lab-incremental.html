@@ -1,0 +1,870 @@
+<!-- 
+【增量定投动力学实验台 (Incremental DCA Lab)】
+模块：[2.0 附表母体]
+职责：沙盒推演母体 (输入控制舱 + 底盒排期舱，5项互锁推演，打包阶梯明细)
+版本：V0.6
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>增量定投动力学 - 极限底线与实操优化双轨沙盒</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0b0f19; color: #e2e8f0; display: flex; height: 100vh; overflow: hidden; }
+    
+    /* 左侧控制台 */
+    .panel { width: 280px; background: #0f172a; border-right: 1px solid #1e293b; padding: 16px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex-shrink: 0; }
+    h2 { font-size: 15px; color: #38bdf8; border-bottom: 1px solid #1e293b; padding-bottom: 6px; }
+    .hint-box { font-size: 11px; color: #94a3b8; background: rgba(30, 41, 59, 0.4); border-left: 3px solid #38bdf8; padding: 6px 10px; border-radius: 4px; line-height: 1.4; }
+
+    .form-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; border-radius: 6px; background: rgba(30, 41, 59, 0.35); border: 1px solid transparent; transition: all 0.2s; }
+    .form-row.is-calc { background: rgba(245, 158, 11, 0.06); border: 1px dashed #f59e0b; }
+    .row-header { display: flex; justify-content: space-between; align-items: center; }
+    label { font-size: 11px; color: #cbd5e1; font-weight: 500; }
+    .label-hint { font-size: 10px; color: #64748b; font-weight: normal; }
+    
+    .sub-calc-hint { font-size: 10px; color: #38bdf8; font-family: monospace; line-height: 1.3; }
+
+    /* 胶囊单选开关：OFF 为暗灰，ON 为高亮橙 */
+    .capsule-switch {
+      width: 44px; height: 22px; background: #070a13; border: 1px solid #334155;
+      border-radius: 4px; position: relative; cursor: pointer; user-select: none;
+      transition: background 0.2s, border-color 0.2s; flex-shrink: 0;
+    }
+    .capsule-slider {
+      position: absolute; top: 2px; left: 2px; width: 17px; height: 16px;
+      background: #475569; border-radius: 2px;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
+    }
+    .capsule-switch:hover .capsule-slider { background: #64748b; }
+    .capsule-switch.calc-mode { background: #141b2d; border-color: #f59e0b; }
+    .capsule-switch.calc-mode .capsule-slider { transform: translateX(21px); background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.4); }
+
+    .micro-interlock-bar {
+      display: flex; gap: 4px; margin-top: 4px; margin-bottom: 2px;
+      background: #070a13; padding: 2px; border-radius: 4px; border: 1px solid #1e293b;
+    }
+    .micro-pill {
+      flex: 1; border: none; background: transparent; color: #64748b; font-size: 10px;
+      padding: 4px 0; border-radius: 3px; cursor: pointer; transition: all 0.15s; font-weight: 500;
+    }
+    .micro-pill.active {
+      background: #1e293b; color: #f59e0b; font-weight: bold; border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .input-box { display: flex; align-items: center; gap: 6px; }
+    .input-split { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+    .split-col { display: flex; flex-direction: column; gap: 2px; }
+    .split-col span { font-size: 9px; color: #64748b; }
+
+    input[type="number"], input[type="text"] {
+      width: 100%; background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+      padding: 6px 8px; border-radius: 4px; font-size: 12px; outline: none; font-variant-numeric: tabular-nums;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    input:focus { border-color: #38bdf8; color: #f8fafc; }
+    input:disabled { background: rgba(15, 23, 42, 0.6); color: #f59e0b; font-weight: bold; border-color: transparent; }
+    
+    .btn-run { background: #0284c7; color: white; border: none; padding: 11px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; margin-top: 4px; transition: background 0.2s; }
+    .btn-run:hover { background: #0369a1; }
+
+    /* 右侧主视窗 */
+    .stage { flex: 1; display: flex; flex-direction: column; padding: 14px 18px; gap: 10px; overflow-y: auto; scroll-behavior: smooth; }
+    
+    /* 5 列 HUD 看板 */
+    .hud { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; flex-shrink: 0; }
+    .hud-card { background: #1e293b; padding: 8px 12px; border-radius: 6px; border-left: 3px solid #38bdf8; }
+    .hud-label { font-size: 10px; color: #94a3b8; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hud-val { font-size: 13.5px; font-weight: bold; color: #f8fafc; font-variant-numeric: tabular-nums; }
+    .val-highlight { color: #f59e0b; }
+    
+    /* 图表区域 */
+    .charts-wrapper { display: flex; flex-direction: column; gap: 8px; height: 440px; flex-shrink: 0; }
+    .chart-box { flex: 1; background: #070a13; border: 1px solid #1e293b; border-radius: 6px; position: relative; }
+    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    .chart-title { position: absolute; top: 5px; left: 12px; font-size: 11px; color: #94a3b8; font-weight: bold; z-index: 10; }
+    .chart-legend { position: absolute; top: 5px; right: 12px; font-size: 10px; color: #64748b; z-index: 10; display: flex; gap: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+    .chart-idle-mask {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      color: #475569; font-size: 11px; pointer-events: none; z-index: 5;
+    }
+
+    /* 左右双列排期表 */
+    .dual-tables-container {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; flex-shrink: 0; margin-bottom: 20px;
+    }
+    .detail-card {
+      background: #0f172a; border: 1px solid #1e293b; border-radius: 6px;
+      display: flex; flex-direction: column; height: 380px;
+    }
+    .card-header {
+      padding: 8px 12px; border-bottom: 1px solid #1e293b; background: #141d33;
+      display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+    }
+    .card-title { font-size: 12px; font-weight: bold; display: flex; align-items: center; gap: 6px; }
+    .card-sub { font-size: 10px; color: #94a3b8; }
+    
+    /* 方案 B 控制器 */
+    .shift-controller-box {
+      padding: 8px 12px; background: rgba(245, 158, 11, 0.04); border-bottom: 1px solid #1e293b;
+      display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+    }
+    .ctrl-row {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .shift-ctrl-label { font-size: 11px; color: #cbd5e1; }
+    .shift-ctrl-actions { display: flex; align-items: center; gap: 4px; }
+    .shift-input { width: 42px !important; padding: 2px 4px !important; text-align: center; height: 22px; font-size: 11px; }
+    .quick-pill {
+      background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-size: 10px;
+      padding: 2px 6px; border-radius: 3px; cursor: pointer; transition: all 0.15s;
+    }
+    .quick-pill:hover { border-color: #f59e0b; color: #f8fafc; }
+    .quick-pill.active {
+      background: #f59e0b; color: #0b0f19; font-weight: bold; border-color: #f59e0b;
+    }
+
+    /* 方案 B 专属计算命令按钮 */
+    .btn-run-opt {
+      background: #d97706; color: white; border: none; padding: 8px 12px;
+      border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px;
+      margin-top: 4px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn-run-opt:hover { background: #b45309; }
+    .btn-run-opt:disabled { background: #1e293b; color: #475569; cursor: not-allowed; border: 1px solid #334155; }
+    .btn-run-opt.highlight-pulse {
+      background: #f59e0b; color: #0f172a;
+      animation: optPulse 1.6s infinite;
+    }
+    @keyframes optPulse {
+      0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+
+    .card-scroll-body {
+      flex: 1; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 4px;
+      background: #090e1a;
+    }
+    .card-scroll-body::-webkit-scrollbar { width: 5px; }
+    .card-scroll-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    .row-compact {
+      display: grid; grid-template-columns: 125px 85px 1fr 65px; align-items: center;
+      padding: 6px 8px; background: #0f172a; border-radius: 4px; border: 1px solid #1e293b;
+      font-size: 11px; font-variant-numeric: tabular-nums;
+    }
+    .row-compact:hover { background: #1e293b; }
+    .row-range { color: #f8fafc; font-weight: 500; }
+    .row-dur { color: #64748b; font-size: 10px; }
+    .row-stat { color: #94a3b8; font-size: 10px; }
+    .row-invest { font-weight: bold; color: #38bdf8; text-align: right; }
+    .row-invest.opt { color: #f59e0b; }
+    .row-broken { background: rgba(239, 68, 68, 0.15) !important; border-color: #ef4444 !important; }
+
+    .card-footer {
+      padding: 8px 12px; border-top: 1px solid #1e293b; background: #141d33;
+      display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;
+    }
+    .footer-stat { font-size: 10px; color: #cbd5e1; }
+    .footer-stat strong { color: #f59e0b; }
+
+    .btn-import-sub {
+      background: #0284c7; color: white; border: none; padding: 6px 12px;
+      border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; transition: background 0.2s;
+    }
+    .btn-import-sub:hover { background: #0369a1; }
+    .btn-import-sub.btn-opt { background: #10b981; }
+    .btn-import-sub.btn-opt:hover { background: #059669; }
+    .btn-import-sub:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+    .empty-state-tip {
+      color: #475569; font-size: 11px; text-align: center; margin-top: 40px; line-height: 1.6; padding: 0 20px;
+    }
+
+    @media (max-width: 900px) {
+      body { flex-direction: column; height: auto; min-height: 100vh; overflow-y: auto; }
+      .panel { width: 100%; height: auto; overflow: visible; }
+      .stage { padding: 12px; height: auto; overflow: visible; }
+      .hud { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+      .charts-wrapper { height: 600px; }
+      .dual-tables-container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="panel">
+    <h2>定投策略推演 (双轨闭环沙盒)</h2>
+    <div class="hint-box">
+      <b>分步独立推演模式：</b>修改数值仅更新预算概算；点击方案 A 确立底线并载入动画，点击方案 B 在原有 A 图上叠加优化大台阶。
+    </div>
+
+    <!-- 1. 刚开始每天投 -->
+    <div class="form-row" id="row-base">
+      <div class="row-header">
+        <label>1. 刚开始每天投 <span class="label-hint">(建议 10~50元)</span></label>
+        <div class="capsule-switch" id="switch-base" onclick="setCalcTarget('base')">
+          <div class="capsule-slider"></div>
+        </div>
+      </div>
+      <div class="input-box">
+        <input type="number" id="val-base" value="20" step="5" oninput="updateTimeAndBudgetHints()">
+      </div>
+    </div>
+
+    <!-- 2. 打算定投多久 -->
+    <div class="form-row" id="row-days">
+      <div class="row-header">
+        <label>2. 打算定投多久 <span class="label-hint">(建议 3~5年)</span></label>
+        <div class="capsule-switch" id="switch-days" onclick="setCalcTarget('days')">
+          <div class="capsule-slider"></div>
+        </div>
+      </div>
+      <div class="sub-calc-hint" id="hint-days-calc">折算：360 × 5 = 1800 天 (约 60 个月)</div>
+      <div class="input-box">
+        <input type="number" id="val-days" value="5" step="0.5" min="0.1" oninput="updateTimeAndBudgetHints()">
+      </div>
+    </div>
+
+    <!-- 3. 每天最低占比要求 -->
+    <div class="form-row" id="row-ratio">
+      <div class="row-header">
+        <label>3. 每天最低占比 <span class="label-hint">(建议 0.2%~0.3%)</span></label>
+        <div class="capsule-switch" id="switch-ratio" onclick="setCalcTarget('ratio')">
+          <div class="capsule-slider"></div>
+        </div>
+      </div>
+      <div class="input-box">
+        <input type="number" id="val-ratio" value="0.25" step="0.05" oninput="updateTimeAndBudgetHints()">
+      </div>
+    </div>
+
+    <!-- 4. 每天最多掏多少 (封顶 - 单框支持随时手动输入或自动反算) -->
+    <div class="form-row is-calc" id="row-max-daily">
+      <div class="row-header">
+        <label>4. 每天最多/封顶 <span class="label-hint">(建议 100~200元)</span></label>
+        <div class="capsule-switch calc-mode" id="switch-max-daily" onclick="setCalcTarget('max-daily')">
+          <div class="capsule-slider"></div>
+        </div>
+      </div>
+      <div class="input-box">
+        <input type="number" id="val-max-daily" value="--" step="5" disabled>
+      </div>
+      <div class="sub-calc-hint" id="hint-max-daily-calc" style="margin-top: 4px;">
+        底线峰值: 等待推演 | 实操峰值: 等待推演
+      </div>
+    </div>
+
+    <!-- 5. 现金流池 (微型互锁) -->
+    <div class="form-row" id="row-total-fund">
+      <div class="row-header">
+        <label>5. 现金流池 (存款 + 每日工资流)</label>
+        <div class="capsule-switch" id="switch-total-fund" onclick="setCalcTarget('total-fund')">
+          <div class="capsule-slider"></div>
+        </div>
+      </div>
+
+      <div class="micro-interlock-bar" id="micro-interlock-bar" style="display: none;">
+        <button type="button" class="micro-pill active" id="btn-lock-dep" onclick="setCashflowInterlock('lock-deposit')">
+          🔒 定存款 · 算月供
+        </button>
+        <button type="button" class="micro-pill" id="btn-lock-mon" onclick="setCashflowInterlock('lock-monthly')">
+          🔒 定月供 · 算底仓
+        </button>
+      </div>
+
+      <div class="input-split">
+        <div class="split-col">
+          <span id="label-deposit">可用存款 (元)</span>
+          <input type="number" id="val-deposit" value="20000" step="1000" oninput="updateTimeAndBudgetHints()">
+        </div>
+        <div class="split-col">
+          <span id="label-monthly">每月支配额 (元/月)</span>
+          <input type="number" id="val-monthly" value="2000" step="100" oninput="updateTimeAndBudgetHints()">
+        </div>
+      </div>
+
+      <div class="sub-calc-hint" id="hint-budget-calc" style="margin-top: 4px;">
+        存款: ¥20,000 | 工资: +¥66.7/天 | 总供给: ¥140,000
+      </div>
+    </div>
+
+    <button class="btn-run" id="btn-run" onclick="executeEngineBaseline()">▶ 第一步：推演底线方案 (方案 A)</button>
+  </div>
+
+  <div class="stage">
+    <!-- 顶部 5 列 HUD 看板 -->
+    <div class="hud">
+      <div class="hud-card" id="hud-card-pool">
+        <div class="hud-label">1. 总可用资金池 (存款 + 工薪流)</div>
+        <div class="hud-val val-highlight" id="hud-total-pool">--</div>
+      </div>
+
+      <div class="hud-card" id="hud-card-fund">
+        <div class="hud-label">2. 方案总支出 (实操 vs 底线)</div>
+        <div class="hud-val val-highlight" id="hud-total-fund">--</div>
+      </div>
+
+      <div class="hud-card" id="hud-card-max-daily">
+        <div class="hud-label">3. 末期最高日投 (极限 vs 优化)</div>
+        <div class="hud-val val-highlight" id="hud-max-daily">--</div>
+      </div>
+
+      <div class="hud-card" id="hud-card-ratio">
+        <div class="hud-label">4. 定投占比 (设定底线 vs 实际最低)</div>
+        <div class="hud-val val-highlight" id="hud-min-ratio">--</div>
+      </div>
+
+      <div class="hud-card" id="hud-card-peak">
+        <div class="hud-label">5. 现存金额最大值 (蓄水峰顶)</div>
+        <div class="hud-val val-highlight" id="hud-peak-cash">--</div>
+      </div>
+    </div>
+
+    <!-- 三张对齐图表 -->
+    <div class="charts-wrapper">
+      <div class="chart-box">
+        <div class="chart-title">每日定投金额 (元)</div>
+        <div class="chart-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#0284c7;"></div> 极限底线(Pass 1)</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;"></div> 实操优化大台阶(Pass 2)</div>
+        </div>
+        <canvas id="canvas-invest"></canvas>
+        <div class="chart-idle-mask" id="mask-invest">等待计算启动...</div>
+      </div>
+      <div class="chart-box">
+        <div class="chart-title">现金蓄水池存量 (元) [紫: 底线方案活钱 | 橙: 实操方案活钱 | 红虚线: 0元破产线]</div>
+        <canvas id="canvas-cum"></canvas>
+        <div class="chart-idle-mask" id="mask-cum">等待计算启动...</div>
+      </div>
+      <div class="chart-box">
+        <div class="chart-title">当日定投占比 (%) [黄: 极限贴底线 | 橙: 实操饱满锯齿 | 红虚线: 底线警戒]</div>
+        <canvas id="canvas-ratio"></canvas>
+        <div class="chart-idle-mask" id="mask-ratio">等待计算启动...</div>
+      </div>
+    </div>
+
+    <!-- 左右双列排期表 -->
+    <div class="dual-tables-container">
+      
+      <!-- 左列：极限底线计算 -->
+      <div class="detail-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span style="color:#38bdf8;">📊 方案 A：极限底线计算</span>
+          </div>
+          <div class="card-sub" id="left-shift-stat">共 -- 次微调换挡</div>
+        </div>
+        <div class="card-scroll-body" id="left-scroll-list">
+          <div class="empty-state-tip">👈 请点击左下角按钮<br><b>【▶ 第一步：推演底线方案】</b></div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-stat" id="left-footer-stat">总耗资: <strong>¥--</strong></div>
+          <button class="btn-import-sub" id="btn-import-left" onclick="confirmAndImport('baseline')" disabled>
+            导入极限方案
+          </button>
+        </div>
+      </div>
+
+      <!-- 右列：实操优化建议 -->
+      <div class="detail-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span style="color:#f59e0b;">⚡ 方案 B：实操优化建议</span>
+          </div>
+          <div class="card-sub" id="right-shift-stat">共 -- 个稳定大阶段</div>
+        </div>
+
+        <div class="shift-controller-box">
+          <div class="ctrl-row">
+            <div class="shift-ctrl-label">
+              目标提档次数 (<span id="limit-shift-hint" style="color:#38bdf8;">极限为 -- 次</span>):
+            </div>
+            <div class="shift-ctrl-actions">
+              <button class="quick-pill" onclick="setShiftCountPreset(3)">3次</button>
+              <button class="quick-pill" onclick="setShiftCountPreset(5)">5次</button>
+              <button class="quick-pill active" onclick="setShiftCountPreset(8)">8次</button>
+              <input type="number" id="opt-shift-count" class="shift-input" value="8" min="1">
+            </div>
+          </div>
+
+          <div class="ctrl-row">
+            <div class="shift-ctrl-label">增幅档位倍数 (主观心智规整):</div>
+            <div class="shift-ctrl-actions" id="step-unit-group">
+              <button class="quick-pill" data-unit="5" onclick="setStepUnit(5)">5倍</button>
+              <button class="quick-pill active" data-unit="10" onclick="setStepUnit(10)">10倍</button>
+              <button class="quick-pill" data-unit="20" onclick="setStepUnit(20)">20倍</button>
+              <button class="quick-pill" data-unit="50" onclick="setStepUnit(50)">50倍</button>
+            </div>
+          </div>
+
+          <button class="btn-run-opt" id="btn-run-opt" onclick="executePlanBOptimization()" disabled>
+            ⚡ 第二步：计算实操优化方案 (方案 B)
+          </button>
+        </div>
+
+        <div class="card-scroll-body" id="right-scroll-list">
+          <div class="empty-state-tip" id="right-empty-state">
+            👈 等待方案 A 基准确立后<br>在此执行独立优化计算
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="footer-stat" id="right-footer-stat">总耗资: <strong>¥--</strong></div>
+          <button class="btn-import-sub btn-opt" id="btn-import-right" onclick="confirmAndImport('optimized')" disabled>
+            ✓ 导入优化方案
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- 引入专业算法与绘图外挂模块 -->
+  <script src="plugins/lab-engine.js"></script>
+  <script src="plugins/lab-charts.js"></script>
+
+  <script>
+    const factorKeys = ['base', 'days', 'ratio', 'max-daily', 'total-fund'];
+    let currentCalcTarget = 'max-daily'; // 严格单选反算目标：默认反算第4项
+    let cashflowSubMode = 'lock-deposit';
+
+    let resultBaseline = null;
+    let resultOptimized = null;
+    let currentStepUnit = 10;
+
+    function setStepUnit(unit) {
+      currentStepUnit = unit;
+      const group = document.getElementById('step-unit-group');
+      if (group) {
+        group.querySelectorAll('.quick-pill').forEach(btn => {
+          btn.classList.toggle('active', Number(btn.getAttribute('data-unit')) === unit);
+        });
+      }
+    }
+
+    function setShiftCountPreset(count) {
+      const input = document.getElementById('opt-shift-count');
+      const maxLimit = Number(input.max) || 30;
+      input.value = Math.min(count, maxLimit);
+    }
+
+    // 输入数值时：只更新文字折算与资金池概算，绝不偷跑仿真计算！
+    function updateTimeAndBudgetHints() {
+      const yrs = Number(document.getElementById('val-days').value) || 0;
+      const days = Math.round(yrs * 360);
+      const months = +(days / 30).toFixed(1);
+      document.getElementById('hint-days-calc').textContent = `折算：360 × ${yrs} = ${days} 天 (约 ${months} 个月)`;
+
+      const dep = Number(document.getElementById('val-deposit').value) || 0;
+      const mon = Number(document.getElementById('val-monthly').value) || 0;
+      const dailyIn = (mon / 30).toFixed(1);
+      const totalInflow = Math.round(dep + days * (mon / 30));
+      
+      const statusDesc = mon <= 0 ? '无需额外月供 (存款充足)' : `+¥${dailyIn}/天 (月补 ¥${mon})`;
+      document.getElementById('hint-budget-calc').textContent = 
+        `存款: ¥${dep.toLocaleString()} | 工资: ${statusDesc} | 总供给: ¥${totalInflow.toLocaleString()}`;
+
+      // 重置已过期状态，等待用户正式点击推演
+      if (currentCalcTarget === 'max-daily') {
+        const inp = document.getElementById('val-max-daily');
+        if (inp && inp.disabled) {
+          inp.value = '--';
+        }
+        const hintEl = document.getElementById('hint-max-daily-calc');
+        if (hintEl) {
+          hintEl.innerHTML = `底线峰值: 等待推演 | 实操峰值: 等待推演`;
+        }
+      }
+    }
+
+    function setCashflowInterlock(mode) {
+      cashflowSubMode = mode;
+      const btnDep = document.getElementById('btn-lock-dep');
+      const btnMon = document.getElementById('btn-lock-mon');
+      const depInp = document.getElementById('val-deposit');
+      const monInp = document.getElementById('val-monthly');
+      const lblDep = document.getElementById('label-deposit');
+      const lblMon = document.getElementById('label-monthly');
+
+      if (mode === 'lock-deposit') {
+        btnDep.classList.add('active');
+        btnMon.classList.remove('active');
+        depInp.disabled = false;
+        monInp.disabled = true;
+        lblDep.textContent = '已有可用存款 (元)';
+        lblMon.textContent = '需每月补贴额 (反算)';
+      } else {
+        btnMon.classList.add('active');
+        btnDep.classList.remove('active');
+        monInp.disabled = false;
+        depInp.disabled = true;
+        lblMon.textContent = '固定每月可支配 (元/月)';
+        lblDep.textContent = '起步安全底仓 (反算)';
+      }
+      updateTimeAndBudgetHints();
+    }
+
+    // 严格单选互斥：4 项暗灰输入，1 项橙黄反算
+    function setCalcTarget(targetKey) {
+      currentCalcTarget = targetKey;
+
+      factorKeys.forEach(k => {
+        const isCalc = (k === currentCalcTarget);
+        const row = document.getElementById(`row-${k}`);
+        const sw = document.getElementById(`switch-${k}`);
+        const inp = document.getElementById(`val-${k}`);
+
+        if (isCalc) {
+          row.classList.add('is-calc');
+          sw.classList.add('calc-mode');
+          if (inp) inp.disabled = true;
+        } else {
+          row.classList.remove('is-calc');
+          sw.classList.remove('calc-mode');
+          if (inp) inp.disabled = false;
+        }
+      });
+
+      const microBar = document.getElementById('micro-interlock-bar');
+      const depInp = document.getElementById('val-deposit');
+      const monInp = document.getElementById('val-monthly');
+
+      if (currentCalcTarget === 'total-fund') {
+        microBar.style.display = 'flex';
+        setCashflowInterlock(cashflowSubMode);
+      } else {
+        microBar.style.display = 'none';
+        depInp.disabled = false;
+        monInp.disabled = false;
+        document.getElementById('label-deposit').textContent = '可用存款 (元)';
+        document.getElementById('label-monthly').textContent = '每月支配额 (元/月)';
+      }
+      updateTimeAndBudgetHints();
+    }
+
+    // ========================================================
+    // 【第一步：点击按钮才推演方案 A，并启动方案 A 独立动画】
+    // ========================================================
+    function executeEngineBaseline() {
+      LabCharts.stopAnimation();
+
+      // 解除图表待命遮罩
+      ['mask-invest', 'mask-cum', 'mask-ratio'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+
+      let base = Math.max(1, Number(document.getElementById('val-base').value) || 20);
+      let minRatio = Math.max(0.0001, (Number(document.getElementById('val-ratio').value) || 0.25) / 100);
+      let inputYears = Math.max(0.1, Number(document.getElementById('val-days').value) || 5);
+      let plannedDays = Math.max(10, Math.round(inputYears * 360));
+      let finalDep = Math.max(0, Number(document.getElementById('val-deposit').value) || 0);
+      let finalMon = Math.max(0, Number(document.getElementById('val-monthly').value) || 0);
+      let maxDaily = Math.max(base, Number(document.getElementById('val-max-daily').value) || 500);
+
+      // 调用引擎求解器反算
+      if (currentCalcTarget === 'base') {
+        base = LabEngine.Solvers.solveBase(maxDaily, plannedDays, minRatio, finalDep, finalMon, currentStepUnit);
+        document.getElementById('val-base').value = base;
+      } else if (currentCalcTarget === 'days') {
+        plannedDays = LabEngine.Solvers.solveDays(base, maxDaily, minRatio, finalDep, finalMon);
+        inputYears = +(plannedDays / 360).toFixed(1);
+        document.getElementById('val-days').value = inputYears;
+      } else if (currentCalcTarget === 'ratio') {
+        minRatio = LabEngine.Solvers.solveRatio(base, plannedDays, maxDaily, finalDep, finalMon);
+        document.getElementById('val-ratio').value = (minRatio * 100).toFixed(2);
+      } else if (currentCalcTarget === 'max-daily') {
+        maxDaily = LabEngine.Solvers.solveMaxDailyBaseline(base, plannedDays, minRatio, finalDep, finalMon);
+        document.getElementById('val-max-daily').value = maxDaily;
+      } else if (currentCalcTarget === 'total-fund') {
+        if (cashflowSubMode === 'lock-deposit') {
+          finalMon = LabEngine.Solvers.solveCashflowMonthly(base, plannedDays, minRatio, maxDaily, finalDep);
+          document.getElementById('val-monthly').value = finalMon;
+        } else {
+          finalDep = LabEngine.Solvers.solveCashflowDeposit(base, plannedDays, minRatio, maxDaily, finalMon);
+          document.getElementById('val-deposit').value = finalDep;
+        }
+        updateTimeAndBudgetHints();
+      }
+
+      // 评估理论微调极限
+      const simInfinity = LabEngine.simulateEngine(base, plannedDays, minRatio, maxDaily, 1e9, 0, null);
+      const baselineShifts = LabEngine.countShifts(simInfinity);
+      const maxAllowedShifts = Math.max(1, baselineShifts > 1 ? baselineShifts - 1 : 1);
+      
+      const shiftInput = document.getElementById('opt-shift-count');
+      shiftInput.max = maxAllowedShifts;
+      document.getElementById('limit-shift-hint').textContent = `极限为 ${baselineShifts} 次，建议 ≤ ${maxAllowedShifts}`;
+
+      // 真实推演方案 A
+      resultBaseline = LabEngine.simulateEngine(base, plannedDays, minRatio, maxDaily, finalDep, finalMon, null);
+      resultOptimized = null; // 重置方案 B，等待后续动画叠加
+
+      // 同步输入框与下方提示
+      document.getElementById('val-max-daily').value = resultBaseline.maxObservedDaily;
+      document.getElementById('hint-max-daily-calc').innerHTML = 
+        `底线峰值: <b>¥${resultBaseline.maxObservedDaily}/天</b> | 实操峰值: <span style="color:#f59e0b;">待第二步计算</span>`;
+
+      // 渲染左侧排期表
+      renderTable('left-scroll-list', resultBaseline, 'baseline');
+      const realBaseShifts = LabEngine.countShifts(resultBaseline);
+      document.getElementById('left-shift-stat').textContent = `共 ${realBaseShifts} 次微调换挡`;
+      document.getElementById('left-footer-stat').innerHTML = `总耗资: <strong>¥${Math.round(resultBaseline.totalSpent).toLocaleString()}</strong>`;
+      document.getElementById('btn-import-left').disabled = (resultBaseline.brokenDay !== null);
+
+      // 准备右侧待命提示与激活按钮
+      document.getElementById('right-scroll-list').innerHTML = `
+        <div class="empty-state-tip" style="color: #f59e0b;">
+          ✨ 方案 A 底线推演完成！<br>
+          理论底线总耗资: <b>¥${Math.round(resultBaseline.totalSpent).toLocaleString()}</b><br><br>
+          👇 请调整提档偏好后，点击：<br>
+          <b>【⚡ 第二步：计算实操优化方案】</b>
+        </div>
+      `;
+      document.getElementById('right-shift-stat').textContent = '等待优化计算';
+      document.getElementById('right-footer-stat').innerHTML = '总耗资: <strong>¥--</strong>';
+      document.getElementById('btn-import-right').disabled = true;
+
+      const btnOpt = document.getElementById('btn-run-opt');
+      btnOpt.disabled = false;
+      btnOpt.classList.add('highlight-pulse');
+
+      // 更新顶部 HUD 看板
+      const totalPool = Math.round(finalDep + plannedDays * (finalMon / 30));
+      document.getElementById('hud-total-pool').textContent = `¥${totalPool.toLocaleString()}`;
+      document.getElementById('hud-total-fund').textContent = `-- vs ¥${Math.round(resultBaseline.totalSpent).toLocaleString()}`;
+      document.getElementById('hud-max-daily').textContent = `¥${resultBaseline.maxObservedDaily} /天 (底线)`;
+      document.getElementById('hud-min-ratio').textContent = `${(minRatio * 100).toFixed(2)}% (底线)`;
+
+      const peakA = LabEngine.findPeakCashInfo(resultBaseline);
+      document.getElementById('hud-peak-cash').innerHTML = 
+        `¥${(peakA.maxVal / 10000).toFixed(1)}万 <span style="font-size:10px; color:#94a3b8; font-weight:normal;">(第${peakA.years}年/底线)</span>`;
+
+      // 启动方案 A 独立动画
+      const btnA = document.getElementById('btn-run');
+      LabCharts.playBaselineAnimation(resultBaseline, {
+        onStart: () => {
+          btnA.disabled = true;
+          btnA.textContent = '⚡ 方案 A 推演中...';
+        },
+        onComplete: () => {
+          btnA.disabled = false;
+          btnA.textContent = '▶ 第一步：推演底线方案 (方案 A)';
+        }
+      });
+    }
+
+    // ========================================================
+    // 【第二步：点击方案 B 时，橙色曲线在原有方案 A 上叠加动画】
+    // ========================================================
+    function executePlanBOptimization() {
+      if (!resultBaseline) {
+        alert('请先推演方案 A 确立物理底线！');
+        return;
+      }
+
+      const btnOpt = document.getElementById('btn-run-opt');
+      btnOpt.classList.remove('highlight-pulse');
+
+      const base = resultBaseline.baseDaily;
+      const plannedDays = resultBaseline.plannedDays;
+      const minRatio = resultBaseline.minRatio;
+      const dep = resultBaseline.deposit;
+      const mon = resultBaseline.monthlyInflow;
+      const totalPool = Math.round(dep + plannedDays * (mon / 30));
+
+      const shiftInput = document.getElementById('opt-shift-count');
+      let shiftCount = Math.max(1, Number(shiftInput.value) || 8);
+
+      let optMaxDaily = resultBaseline.maxDaily;
+
+      if (currentCalcTarget === 'max-daily') {
+        optMaxDaily = LabEngine.Solvers.solveOptimizedCap(
+          base, plannedDays, minRatio, resultBaseline.maxDaily,
+          dep, mon, shiftCount, currentStepUnit, (resultBaseline.brokenDay !== null)
+        );
+      }
+
+      const ladder = LabEngine.generateSmartLadder(base, optMaxDaily, shiftCount, currentStepUnit);
+      resultOptimized = LabEngine.simulateEngine(base, plannedDays, minRatio, optMaxDaily, dep, mon, ladder);
+
+      renderTable('right-scroll-list', resultOptimized, 'optimized');
+
+      const optShifts = LabEngine.countShifts(resultOptimized);
+      document.getElementById('right-shift-stat').textContent = `共 ${optShifts + 1} 个稳定大阶段`;
+      document.getElementById('right-footer-stat').innerHTML = `总耗资: <strong>¥${Math.round(resultOptimized.totalSpent).toLocaleString()}</strong>`;
+      
+      const btnImportRight = document.getElementById('btn-import-right');
+      if (resultOptimized.brokenDay !== null) {
+        btnImportRight.disabled = true;
+        btnImportRight.textContent = `⚠️ 资金提前枯竭 (第${resultOptimized.brokenDay}天)`;
+      } else {
+        btnImportRight.disabled = false;
+        btnImportRight.textContent = `✓ 导入优化方案`;
+      }
+
+      document.getElementById('hint-max-daily-calc').innerHTML = 
+        `底线峰值: ¥${resultBaseline.maxObservedDaily}/天 | 实操峰值: <b style="color:#f59e0b;">¥${resultOptimized.maxObservedDaily}/天</b>`;
+
+      // 刷新 HUD 完整对比
+      const optSpent = Math.round(resultOptimized.totalSpent);
+      const baseSpent = Math.round(resultBaseline.totalSpent);
+      const utilPct = totalPool > 0 ? ((optSpent / totalPool) * 100).toFixed(1) : 0;
+      document.getElementById('hud-total-fund').textContent = 
+        `¥${optSpent.toLocaleString()} vs ¥${baseSpent.toLocaleString()} (${utilPct}%)`;
+      
+      document.getElementById('hud-max-daily').textContent = 
+        `¥${resultBaseline.maxObservedDaily} vs ¥${resultOptimized.maxObservedDaily} /天`;
+      
+      const reqRatioPct = (minRatio * 100).toFixed(2);
+      const optMinRatioPct = (resultOptimized.lowestObservedRatio * 100).toFixed(2);
+      const ratioEl = document.getElementById('hud-min-ratio');
+      if (resultOptimized.lowestObservedRatio < minRatio - 0.0001) {
+        ratioEl.innerHTML = `<span style="color:#f59e0b;">${reqRatioPct}% vs ${optMinRatioPct}% (轻微钝化)</span>`;
+      } else {
+        ratioEl.innerHTML = `<span style="color:#10b981;">${reqRatioPct}% vs ${optMinRatioPct}% (稳健达标)</span>`;
+      }
+
+      const peakB = LabEngine.findPeakCashInfo(resultOptimized);
+      document.getElementById('hud-peak-cash').innerHTML = 
+        `¥${(peakB.maxVal / 10000).toFixed(1)}万 <span style="font-size:10px; color:#f59e0b; font-weight:normal;">(第${peakB.years}年峰顶)</span>`;
+
+      // 方案 B 叠加动画：方案 A 保持 100% 显示，方案 B 橙线从左到右实时叠加生长！
+      const btnB = document.getElementById('btn-run-opt');
+      LabCharts.playOptimizedOverlayAnimation(resultBaseline, resultOptimized, {
+        onStart: () => {
+          btnB.disabled = true;
+          btnB.textContent = '⚡ 方案 B 叠加中...';
+        },
+        onComplete: () => {
+          btnB.disabled = false;
+          btnB.textContent = '⚡ 第二步：计算实操优化方案 (方案 B)';
+        }
+      });
+    }
+
+    function renderTable(containerId, res, type) {
+      const list = document.getElementById(containerId);
+      list.innerHTML = '';
+      const fragment = document.createDocumentFragment();
+
+      const history = res.history;
+      const intervals = [];
+      let currentGroup = null;
+
+      for (let i = 0; i < history.length; i++) {
+        const item = history[i];
+        if (!currentGroup || currentGroup.invest !== item.invest || item.isBroken) {
+          if (currentGroup) intervals.push(currentGroup);
+          currentGroup = {
+            startDay: item.day, endDay: item.day, invest: item.invest,
+            count: 1, startCum: item.cumSpent - item.invest,
+            endCum: item.cumSpent, isBroken: item.isBroken
+          };
+        } else {
+          currentGroup.endDay = item.day;
+          currentGroup.endCum = item.cumSpent;
+          currentGroup.count++;
+        }
+      }
+      if (currentGroup) intervals.push(currentGroup);
+
+      intervals.forEach((inv) => {
+        const row = document.createElement('div');
+        row.className = `row-compact ${inv.isBroken ? 'row-broken' : ''}`;
+        const rangeStr = inv.startDay === inv.endDay ? `第 ${inv.startDay} 天` : `第 ${inv.startDay}~${inv.endDay} 天`;
+        const durStr = `${inv.count}天 (${(inv.count/30).toFixed(1)}月)`;
+        const investColorClass = type === 'optimized' ? 'row-invest opt' : 'row-invest';
+
+        row.innerHTML = `
+          <div class="row-range">${rangeStr}</div>
+          <div class="row-dur">${durStr}</div>
+          <div class="row-stat">累投 ¥${Math.round(inv.endCum).toLocaleString()}</div>
+          <div class="${investColorClass}">¥${inv.invest}</div>
+        `;
+        fragment.appendChild(row);
+      });
+
+      list.appendChild(fragment);
+    }
+
+    function confirmAndImport(selectedType) {
+      const res = (selectedType === 'optimized') ? resultOptimized : resultBaseline;
+      const planName = (selectedType === 'optimized') ? '实操优化大阶梯方案' : '理论极限微调方案';
+      if (!res || res.brokenDay !== null) return;
+
+      const mon = Number(document.getElementById('val-monthly')?.value) || 0;
+      const cruiseDaily = Math.round(mon / 30);
+
+      // 提取完整的阶梯台阶明细 (供主表截图右侧档案卡精确渲染)
+      const ladderIntervals = [];
+      let curGrp = null;
+      for (let i = 0; i < res.history.length; i++) {
+        const item = res.history[i];
+        if (!curGrp || curGrp.invest !== item.invest) {
+          if (curGrp) ladderIntervals.push(curGrp);
+          curGrp = {
+            startDay: item.day,
+            endDay: item.day,
+            invest: item.invest,
+            count: 1,
+            endCum: item.cumSpent
+          };
+        } else {
+          curGrp.endDay = item.day;
+          curGrp.endCum = item.cumSpent;
+          curGrp.count++;
+        }
+      }
+      if (curGrp) ladderIntervals.push(curGrp);
+
+      const strategyPayload = {
+        updatedAt: new Date().toISOString(),
+        planType: selectedType,
+        summary: {
+          planName: planName,
+          totalFund: Math.round(res.totalSpent),
+          maxDaily: res.maxObservedDaily,
+          totalDays: res.finalDays,
+          plannedDays: res.plannedDays,
+          isBroken: false,
+          brokenDay: null,
+          totalYears: (res.finalDays / 360).toFixed(1),
+          minRatio: (res.minRatio * 100).toFixed(2),
+          baseDaily: res.baseDaily,
+          cruiseDaily: cruiseDaily,
+          monthlyDisposable: mon,
+          ladderIntervals: ladderIntervals // 👈 核心：将完整台阶明细打包
+        },
+        dailySchedule: res.history.map(d => ({
+          day: d.day, invest: d.invest, cumSpent: d.cumSpent
+        }))
+      };
+
+      localStorage.setItem('active_dca_strategy', JSON.stringify(strategyPayload));
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: 'DCA_STRATEGY_IMPORTED', payload: strategyPayload }, '*');
+        alert(`已成功将【${planName}】导入主表！`);
+        window.close();
+      } else {
+        alert(`已成功将【${planName}】导入！正在前往主表页面...`);
+        window.location.href = 'index.html';
+      }
+    }
+
+    window.onload = () => {
+      setCalcTarget('max-daily');
+      updateTimeAndBudgetHints();
+    };
+  </script>
+</body>
+</html>
