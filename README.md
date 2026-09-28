@@ -32,7 +32,7 @@
 
 ## 📸 运行预览
 <div align="center">
-  <video src="docs/demo.mp4" controls autoplay loop muted width="100%">
+  <video src="https://raw.githubusercontent.com/xuelefei4-blip/incremental-dca-lab/main/docs/demo.mp4" controls width="100%">
     您的浏览器不支持视频播放，请直接下载查看。
   </video>
   <p><i>▶ 演示：纳斯达克\沪深 300 \ BTC  ——6年定投收益对比。阶梯增量定投模式演示</i></p>
