@@ -32,10 +32,15 @@
 
 ## 📸 运行预览
 <div align="center">
-  <video src="https://raw.githubusercontent.com/xuelefei4-blip/incremental-dca-lab/main/docs/demo.mp4" controls width="100%">
-    您的浏览器不支持视频播放，请直接下载查看。
-  </video>
-  <p><i>▶ 演示：纳斯达克\沪深 300 \ BTC  ——6年定投收益对比。阶梯增量定投模式演示</i></p>
+  <a href="https://github.com/xuelefei4-blip/incremental-dca-lab/blob/main/docs/demo.mp4" title="点击观看完整演练视频">
+    <img src="docs/demo_cover.png" width="100%" alt="系统操作界面演示" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+  </a>
+  <p>
+    <a href="https://github.com/xuelefei4-blip/incremental-dca-lab/blob/main/docs/demo.mp4">
+      <img src="https://img.shields.io/badge/▶_点击在线观看-完整系统推演演示视频_(MP4)-2ea44f?style=for-the-badge" alt="播放视频">
+    </a>
+  </p>
+  <p><i>👆 点击上方预览图或按钮，直接在 GitHub 原生播放器中全屏流畅观看演示</i></p>
 </div>
 ---
 
