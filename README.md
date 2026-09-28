@@ -32,15 +32,10 @@
 
 ## 📸 运行预览
 <div align="center">
-  <a href="https://github.com/xuelefei4-blip/incremental-dca-lab/blob/main/docs/demo.mp4" title="点击观看完整演练视频">
-    <img src="docs/demo_cover.png" width="100%" alt="系统操作界面演示" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-  </a>
-  <p>
-    <a href="https://github.com/xuelefei4-blip/incremental-dca-lab/blob/main/docs/demo.mp4">
-      <img src="https://img.shields.io/badge/▶_点击在线观看-完整系统推演演示视频_(MP4)-2ea44f?style=for-the-badge" alt="播放视频">
-    </a>
-  </p>
-  <p><i>👆 点击上方预览图或按钮，直接在 GitHub 原生播放器中全屏流畅观看演示</i></p>
+  <video src="https://github.com/user-attachments/assets/6f1dd83c-4069-4821-a165-b049bd7fa60c" controls width="100%">
+    您的浏览器不支持视频播放。
+  </video>
+  <p><i>▶ 演示：增量定投逆风吸筹实操 ➔ 口袋陈列馆双轨切磋 ➔ 高保真合成大图导出</i></p>
 </div>
 ---
 
